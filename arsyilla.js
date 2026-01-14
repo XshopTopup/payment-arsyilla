@@ -1,9 +1,9 @@
-const createPakasirClient = require('pakasir-sdk');
+const { Pakasir } = require('pakasir-sdk');
 
 const ArsyillaSlug = 'arsyilla';
 const ArsyillaApikey = 'b6fFuc6r4L7nB7407qcql085pSvgcPa3';
 
-const arsyillaClient = createPakasirClient(
+const arsyillaClient = new Pakasir(
   ArsyillaSlug,
   ArsyillaApikey
 );
