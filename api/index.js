@@ -1,272 +1,255 @@
-// HTML Documentation Page
-const HTML_DOCS = `
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pakasir QRIS Developer Portal</title>
+import mongoose from 'mongoose';
+import axios from 'axios';
+import { parse } from 'url';
 
-    <style>
-        /* ===============================
-           THEME VARIABLES
-        =============================== */
-        :root {
-            --bg-main: #f5f7fb;
-            --bg-card: #ffffff;
-            --bg-header: #ffffff;
-            --border: #e5e7eb;
+// ==========================================
+// 1. KONFIGURASI & DATABASE
+// ==========================================
+const MONGODB_URI = process.env.MONGODB_URI;
+const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
+const PAKASIR_PROJECT_SLUG = process.env.PAKASIR_PROJECT_SLUG;
+const PAKASIR_BASE_URL = 'https://app.pakasir.com/api';
 
-            --text-main: #111827;
-            --text-muted: #6b7280;
+// Cache koneksi database (agar tidak reconnect terus menerus di serverless)
+let isConnected = false;
 
-            --primary: #2563eb;
-            --primary-soft: #e0e7ff;
+const connectDB = async () => {
+  if (isConnected) return;
+  
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI tidak ditemukan di Environment Variables!");
+  }
 
-            --code-bg: #0f172a;
-            --code-text: #e5e7eb;
+  try {
+    const db = await mongoose.connect(MONGODB_URI);
+    isConnected = db.connections[0].readyState;
+    console.log('[DB] MongoDB Connected');
+  } catch (error) {
+    console.error('[DB] Error:', error);
+    throw error;
+  }
+};
 
-            --warn-bg: #fff7ed;
-            --warn-text: #92400e;
+// ==========================================
+// 2. SCHEMA DATABASE
+// ==========================================
+const TransactionSchema = new mongoose.Schema({
+  order_id: { type: String, required: true, unique: true },
+  client_webhook_url: { type: String, required: true },
+  amount: Number,
+  status: { type: String, default: 'pending' },
+  qr_string: String,
+  expired_at: Date,
+  created_at: { type: Date, default: Date.now }
+});
 
-            --radius-lg: 14px;
-            --radius-md: 10px;
-        }
+// Mencegah error "OverwriteModelError" saat hot-reload
+const Transaction = mongoose.models.Transaction || mongoose.model('Transaction', TransactionSchema);
 
-        [data-theme="dark"] {
-            --bg-main: #0b1020;
-            --bg-card: #0f172a;
-            --bg-header: #020617;
-            --border: #1e293b;
+// ==========================================
+// 3. LOGIKA FUNCTION (CONTROLLERS)
+// ==========================================
 
-            --text-main: #e5e7eb;
-            --text-muted: #94a3b8;
+// --- A. CREATE PAYMENT ---
+async function handleCreatePayment(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-            --primary: #60a5fa;
-            --primary-soft: #1e293b;
+  const { amount, client_webhook_url } = req.body;
+  if (!amount || !client_webhook_url) {
+    return res.status(400).json({ error: 'Wajib diisi: amount, client_webhook_url' });
+  }
 
-            --code-bg: #020617;
-            --code-text: #e5e7eb;
+  await connectDB();
+  
+  const orderId = `INV-${Date.now()}`;
+  const pakasirPayload = {
+    project: PAKASIR_PROJECT_SLUG,
+    order_id: orderId,
+    amount: amount,
+    api_key: PAKASIR_API_KEY
+  };
 
-            --warn-bg: #1f2937;
-            --warn-text: #fbbf24;
-        }
+  try {
+    console.log(`[Create] Requesting QRIS for ${orderId}...`);
+    const response = await axios.post(`${PAKASIR_BASE_URL}/transactioncreate/qris`, pakasirPayload);
+    const data = response.data.payment;
 
-        * {
-            box-sizing: border-box;
-        }
+    await Transaction.create({
+      order_id: orderId,
+      client_webhook_url: client_webhook_url,
+      amount: amount,
+      status: 'pending',
+      qr_string: data.payment_number,
+      expired_at: data.expired_at
+    });
 
-        body {
-            margin: 0;
-            font-family: Inter, "Segoe UI", system-ui, monospace;
-            background: var(--bg-main);
-            color: var(--text-main);
-            line-height: 1.6;
-        }
+    return res.status(200).json({
+      success: true,
+      order_id: orderId,
+      amount: data.amount,
+      fee: data.fee,
+      total_payment: data.total_payment,
+      qr_string: data.payment_number,
+      qr_image_url: `https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encodeURIComponent(data.payment_number)}&choe=UTF-8`,
+      expired_at: data.expired_at
+    });
+  } catch (error) {
+    console.error('[Create Error]', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Gagal membuat QRIS', details: error.response?.data || error.message });
+  }
+}
 
-        /* ===============================
-           HEADER (SaaS Style)
-        =============================== */
-        header {
-            background: var(--bg-header);
-            border-bottom: 1px solid var(--border);
-            padding: 14px 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
+// --- B. WEBHOOK HANDLER (DARI PAKASIR) ---
+async function handleWebhook(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-        .brand {
-            font-weight: 700;
-            font-size: 0.95rem;
-            letter-spacing: 0.04em;
-        }
+  const { order_id, status } = req.body;
+  
+  // Respon cepat ke Pakasir agar tidak timeout
+  res.status(200).json({ status: 'received' });
 
-        .toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            padding: 6px 14px;
-            border-radius: 999px;
-            cursor: pointer;
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: var(--text-muted);
-            transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
-        }
+  if (!order_id) return;
 
-        .toggle:hover {
-            background: var(--primary-soft);
-            color: var(--primary);
-        }
+  try {
+    await connectDB();
+    const transaction = await Transaction.findOne({ order_id });
 
-        [data-theme="dark"] .toggle {
-            background: #020617;
-            color: #e5e7eb;
-            border-color: #1e293b;
-        }
-
-        [data-theme="dark"] .toggle:hover {
-            color: #60a5fa;
-        }
-
-        /* ===============================
-           MAIN LAYOUT
-        =============================== */
-        main {
-            max-width: 960px;
-            margin: 0 auto;
-            padding: 32px 20px;
-        }
-
-        h1 {
-            font-size: 2rem;
-            margin-bottom: 32px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 14px;
-        }
-
-        h2 {
-            font-size: 1.25rem;
-            margin-bottom: 6px;
-            color: var(--primary);
-        }
-
-        p {
-            color: var(--text-muted);
-            font-size: 0.95rem;
-        }
-
-        /* ===============================
-           CARD / SECTION
-        =============================== */
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 28px;
-            margin-bottom: 24px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-        }
-
-        .endpoint {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 10px 0 16px;
-        }
-
-        .badge {
-            background: linear-gradient(135deg, var(--primary), #1d4ed8);
-            color: #fff;
-            padding: 5px 10px;
-            border-radius: 999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        code {
-            background: var(--primary-soft);
-            color: var(--primary);
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-
-        pre {
-            background: var(--code-bg);
-            color: var(--code-text);
-            padding: 18px 20px;
-            border-radius: var(--radius-md);
-            overflow-x: auto;
-            font-size: 0.85rem;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .warn {
-            margin-top: 16px;
-            padding: 14px 16px;
-            border-radius: var(--radius-md);
-            background: var(--warn-bg);
-            color: var(--warn-text);
-            border-left: 4px solid #f59e0b;
-            font-size: 0.9rem;
-        }
-    </style>
-</head>
-<body>
-
-<header>
-    <div class="brand">Pakasir • Developer Portal</div>
-    <button class="toggle" id="themeToggle" aria-pressed="false">
-        🌙 Dark
-    </button>
-</header>
-
-<main>
-    <h1>QRIS Integration</h1>
-
-    <div class="card">
-        <h2>1. Create Payment</h2>
-
-        <div class="endpoint">
-            <span class="badge">POST</span>
-            <code>/api/create-payment</code>
-        </div>
-
-        <p>Membuat QRIS baru dan menerima QR String dari sistem Pakasir.</p>
-
-        <pre>{
-  "amount": 99000,
-  "client_webhook_url": "https://aplikasi-anda.com/webhook"
-}</pre>
-    </div>
-
-    <div class="card">
-        <h2>2. Webhook Configuration</h2>
-
-        <p>Masukkan URL berikut ke menu <b>Edit Proyek</b> di Dashboard Pakasir.</p>
-
-        <pre>https://${process.env.VERCEL_URL || 'nama-app.vercel.app'}/webhook</pre>
-
-        <div class="warn">
-            Sistem akan memvalidasi status pembayaran ke Pakasir sebelum notifikasi diteruskan ke aplikasi Anda.
-        </div>
-    </div>
-</main>
-
-<script>
-    const toggle = document.getElementById('themeToggle');
-    const root = document.documentElement;
-
-    function setTheme(theme) {
-        root.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-
-        const isDark = theme === 'dark';
-        toggle.textContent = isDark ? '☀️ Light' : '🌙 Dark';
-        toggle.setAttribute('aria-pressed', isDark);
+    if (!transaction) {
+      console.log(`[Webhook Ignored] Order ID tidak dikenal: ${order_id}`);
+      return;
     }
 
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
-
-    toggle.addEventListener('click', () => {
-        const current = root.getAttribute('data-theme') || 'light';
-        setTheme(current === 'dark' ? 'light' : 'dark');
+    // Validasi ke Pakasir (Double Check)
+    console.log(`[Verify] Memvalidasi status ${order_id}...`);
+    const verifyRes = await axios.get(`${PAKASIR_BASE_URL}/transactiondetail`, {
+      params: {
+        project: PAKASIR_PROJECT_SLUG,
+        amount: transaction.amount,
+        order_id: order_id,
+        api_key: PAKASIR_API_KEY
+      }
     });
-</script>
 
-</body>
-</html>
-`;
+    const verifiedStatus = verifyRes.data.transaction?.status;
 
-export default function handler(req, res) {
-  res.status(200).send(HTML_DOCS);
+    if (verifiedStatus === 'completed') {
+      transaction.status = 'completed';
+      await transaction.save();
+
+      console.log(`[Relay] Forwarding sukses ke ${transaction.client_webhook_url}`);
+      await axios.post(transaction.client_webhook_url, req.body, {
+        headers: { 'X-Relayed-By': 'Pakasir-Hub' },
+        timeout: 8000
+      });
+    }
+  } catch (error) {
+    console.error('[Webhook Error]', error.message);
+  }
+}
+
+// --- C. CANCEL PAYMENT ---
+async function handleCancelPayment(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+  const { order_id, amount } = req.body;
+  if (!order_id || !amount) return res.status(400).json({ error: 'Butuh order_id dan amount' });
+
+  try {
+    await connectDB();
+    
+    await axios.post(`${PAKASIR_BASE_URL}/transactioncancel`, {
+      project: PAKASIR_PROJECT_SLUG,
+      order_id: order_id,
+      amount: amount,
+      api_key: PAKASIR_API_KEY
+    });
+    
+    await Transaction.findOneAndUpdate({ order_id }, { status: 'canceled' });
+    return res.status(200).json({ success: true, message: 'Transaksi dibatalkan' });
+  } catch (error) {
+    return res.status(500).json({ error: error.response?.data || error.message });
+  }
+}
+
+// --- D. HTML DOCUMENTATION ---
+function serveDocs(res) {
+  const html = `
+  <!DOCTYPE html>
+  <html lang="id">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Pakasir QRIS Hub</title>
+      <style>
+          body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; background: #f4f4f9; }
+          h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+          .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+          code { background: #eee; padding: 2px 5px; border-radius: 4px; color: #d63384; }
+          pre { background: #222; color: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; }
+          .badge { background: #28a745; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; }
+      </style>
+  </head>
+  <body>
+      <h1>🔌 Pakasir QRIS Gateway</h1>
+      
+      <div class="card">
+          <h3>1. Create Payment</h3>
+          <p><span class="badge">POST</span> <code>/api/create-payment</code></p>
+          <pre>{
+  "amount": 10000,
+  "client_webhook_url": "https://aplikasi-anda.com/webhook"
+}</pre>
+      </div>
+
+      <div class="card">
+          <h3>2. Setup Webhook Pakasir</h3>
+          <p>Masukkan URL ini di dashboard Pakasir Anda:</p>
+          <pre>https://${process.env.VERCEL_URL || 'domain-anda.vercel.app'}/api/webhook</pre>
+      </div>
+
+      <div class="card">
+          <h3>3. Cancel Payment</h3>
+          <p><span class="badge">POST</span> <code>/api/cancel-payment</code></p>
+          <pre>{ "order_id": "...", "amount": 10000 }</pre>
+      </div>
+  </body>
+  </html>
+  `;
+  res.setHeader('Content-Type', 'text/html');
+  return res.status(200).send(html);
+}
+
+// ==========================================
+// 4. MAIN HANDLER (ROUTER UTAMA)
+// ==========================================
+export default async function handler(req, res) {
+  const { url } = req;
+  const { pathname } = parse(url, true);
+
+  // ROUTING MANUAL (Switch Case)
+  // Menangani request berdasarkan akhiran URL
+  
+  if (pathname === '/' || pathname === '/api') {
+    return serveDocs(res);
+  } 
+  
+  else if (pathname.endsWith('/create-payment')) {
+    return await handleCreatePayment(req, res);
+  } 
+  
+  else if (pathname.endsWith('/webhook')) {
+    return await handleWebhook(req, res);
+  } 
+  
+  else if (pathname.endsWith('/cancel-payment')) {
+    return await handleCancelPayment(req, res);
+  }
+
+  // Fallback 404
+  else {
+    return res.status(404).json({ 
+      error: 'Endpoint not found', 
+      available_endpoints: ['/api/create-payment', '/api/webhook', '/api/cancel-payment'] 
+    });
+  }
 }
