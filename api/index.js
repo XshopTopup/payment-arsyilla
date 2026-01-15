@@ -208,7 +208,7 @@ function serveDocs(res) {
       </style>
   </head>
   <body>
-      <h1>🔌 Pakasir QRIS Gateway</h1>
+      <h1>API Pakasir QRIS</h1>
       
       <div class="card">
           <h3>1. Create Payment</h3>
