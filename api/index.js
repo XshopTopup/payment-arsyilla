@@ -98,54 +98,7 @@ async function handleCreatePayment(req, res) {
     return res.status(500).json({ error: 'Gagal membuat QRIS', details: error.response?.data || error.message });
   }
 }
-/*
-// --- B. WEBHOOK HANDLER (DARI PAKASIR) ---
-async function handleWebhook(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const { order_id, status } = req.body;
-  
-  // Respon cepat ke Pakasir agar tidak timeout
-  res.status(200).json({ status: 'received' });
-
-  if (!order_id) return;
-
-  try {
-    await connectDB();
-    const transaction = await Transaction.findOne({ order_id });
-
-    if (!transaction) {
-      console.log(`[Webhook Ignored] Order ID tidak dikenal: ${order_id}`);
-      return;
-    }
-
-    // Validasi ke Pakasir (Double Check)
-    console.log(`[Verify] Memvalidasi status ${order_id}...`);
-    const verifyRes = await axios.get(`${PAKASIR_BASE_URL}/transactiondetail`, {
-      params: {
-        project: PAKASIR_PROJECT_SLUG,
-        amount: transaction.amount,
-        order_id: order_id,
-        api_key: PAKASIR_API_KEY
-      }
-    });
-
-    const verifiedStatus = verifyRes.data.transaction?.status;
-
-    if (verifiedStatus === 'completed') {
-      transaction.status = 'completed';
-      await transaction.save();
-
-      console.log(`[Relay] Forwarding sukses ke ${transaction.client_webhook_url}`);
-      await axios.post(transaction.client_webhook_url, req.body, {
-        headers: { 'X-Relayed-By': 'Pakasir-Hub' },
-        timeout: 8000
-      });
-    }
-  } catch (error) {
-    console.error('[Webhook Error]', error.message);
-  }
-}*/
 async function handleWebhook(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
