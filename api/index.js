@@ -197,7 +197,7 @@ function serveDocs(res) {
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Pakasir QRIS Hub</title>
+      <title>API QRIS</title>
       <style>
           body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; background: #f4f4f9; }
           h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
@@ -208,7 +208,7 @@ function serveDocs(res) {
       </style>
   </head>
   <body>
-      <h1>API Pakasir QRIS</h1>
+      <h1>API QRIS</h1>
       
       <div class="card">
           <h3>1. Create Payment</h3>
@@ -220,8 +220,8 @@ function serveDocs(res) {
       </div>
 
       <div class="card">
-          <h3>2. Setup Webhook Pakasir</h3>
-          <p>Masukkan URL ini di dashboard Pakasir Anda:</p>
+          <h3>2. Setup Webhook</h3>
+          <p>Masukkan URL ini di dashboard Akun Anda:</p>
           <pre>https://payment-arsyilla.vercel.app/api/webhook</pre>
       </div>
 
