@@ -222,7 +222,7 @@ function serveDocs(res) {
       <div class="card">
           <h3>2. Setup Webhook Pakasir</h3>
           <p>Masukkan URL ini di dashboard Pakasir Anda:</p>
-          <pre>https://${process.env.VERCEL_URL || 'domain-anda.vercel.app'}/api/webhook</pre>
+          <pre>https://payment-arsyilla.vercel.app/api/webhook</pre>
       </div>
 
       <div class="card">
