@@ -61,7 +61,7 @@ async function handleCreatePayment(req, res) {
 
   await connectDB();
   
-  const orderId = `INV-${Date.now()}`;
+  const orderId = `ARS-${Date.now()}`;
   const pakasirPayload = {
     project: PAKASIR_PROJECT_SLUG,
     order_id: orderId,
